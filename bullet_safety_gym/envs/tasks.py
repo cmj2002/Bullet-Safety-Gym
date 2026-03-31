@@ -1,5 +1,3 @@
-import time
-
 import numpy as np
 
 from bullet_safety_gym.envs import agents, bases, env_utils, sensors
@@ -24,13 +22,14 @@ def angle2pos(pos1: np.ndarray, pos2: np.ndarray) -> float:
 
 class ReachGoalTask(bases.Task):
 
-    def __init__(self, bc, world, agent, obstacles, use_graphics):
+    def __init__(self, bc, world, agent, obstacles, use_graphics, rng=None):
         super().__init__(bc=bc,
                          world=world,
                          agent=agent,
                          obstacles=obstacles,
                          continue_after_goal_achievement=True,
-                         use_graphics=use_graphics)
+                         use_graphics=use_graphics,
+                         rng=rng)
         # spawn goal zone
         self.goal = GoalZone(bc)
         self.world_name = world
@@ -130,7 +129,7 @@ class ReachGoalTask(bases.Task):
             goal_list.append(np.array([-4.37084707, 3.40952192, 0.]))
 
         if case == 0:
-            index = np.random.randint(len(goal_list))
+            index = self.rng.integers(len(goal_list))
             new_goal_pos = goal_list[index]
 
         if case == 1:
@@ -153,12 +152,13 @@ class ReachGoalTask(bases.Task):
     # Modified
     def specific_reset(self) -> None:
         """ Set positions and orientations of agent and obstacles."""
+        self.switch_flag = False
 
         case = 2
 
         # set agent and goal positions
         self.agent.specific_reset()
-        agent_pos = self.agent.init_xyz
+        agent_pos = self.agent.init_xyz.copy()
         agent_pos[:2] = self.world.generate_random_xyz_position()[:2]
         goal_pos = agent_pos
         while np.linalg.norm(agent_pos[:2] -
@@ -170,8 +170,8 @@ class ReachGoalTask(bases.Task):
         if len(self.obstacles) > 0:
             obs_init_pos = env_utils.generate_obstacles_init_pos(
                 num_obstacles=len(self.obstacles),
-                agent_pos=self.agent.get_position(),
-                goal_pos=self.goal.get_position(),
+                agent_pos=agent_pos,
+                goal_pos=goal_pos,
                 world=self.world,
                 min_allowed_distance=self.world.body_min_distance,
                 agent_obstacle_distance=self.agent_obstacle_distance)
@@ -239,7 +239,7 @@ class ReachGoalTask(bases.Task):
         yaw = angle2pos(self.agent.get_position(), self.goal.get_position())
         yaw = self.agent.init_rpy[2] + yaw
         # apply random orientation to agent.
-        yaw += np.random.uniform(-np.pi, np.pi)
+        yaw += self.rng.uniform(-np.pi, np.pi)
         quaternion = self.bc.getQuaternionFromEuler([0, 0, yaw])
         self.agent.set_orientation(quaternion)
 
@@ -259,13 +259,15 @@ class PushTask(bases.Task):
                  agent,
                  obstacles,
                  use_graphics,
-                 sensor='LIDARSensor'):
+                 sensor='LIDARSensor',
+                 rng=None):
         super().__init__(bc=bc,
                          world=world,
                          agent=agent,
                          obstacles=obstacles,
                          continue_after_goal_achievement=True,
-                         use_graphics=use_graphics)
+                         use_graphics=use_graphics,
+                         rng=rng)
         # spawn goal zone
         self.goal = GoalZone(bc=bc)
         self.puck = Puck(bc=bc)
@@ -389,7 +391,7 @@ class PushTask(bases.Task):
         self.old_dist = self.get_xy_distance()
 
         # apply random orientation to agent.
-        random_yaw = np.random.uniform(-np.pi, np.pi)
+        random_yaw = self.rng.uniform(-np.pi, np.pi)
         quaternion = self.bc.getQuaternionFromEuler([0, 0, random_yaw])
         self.agent.set_orientation(quaternion)
 
@@ -420,6 +422,7 @@ class CircleTask(bases.Task):
         agent,
         obstacles,
         use_graphics,
+        rng=None,
     ):
         super().__init__(
             bc=bc,
@@ -427,7 +430,8 @@ class CircleTask(bases.Task):
             agent=agent,
             obstacles=obstacles,
             continue_after_goal_achievement=False,  # no goal present
-            use_graphics=use_graphics)
+            use_graphics=use_graphics,
+            rng=rng)
         self.old_velocity = 0.0  # used for shaped rewards
 
         # spawn circle zone
@@ -502,11 +506,11 @@ class CircleTask(bases.Task):
         max_dist_to_origin = 4.
         min_dist_to_origin = 2
 
-        agent_pos = np.random.uniform(-max_dist_to_origin, max_dist_to_origin,
+        agent_pos = self.rng.uniform(-max_dist_to_origin, max_dist_to_origin,
                                       2)
         positioning_done = False
         while not positioning_done:
-            agent_pos = np.random.uniform(-max_dist_to_origin,
+            agent_pos = self.rng.uniform(-max_dist_to_origin,
                                           max_dist_to_origin, 2)
             if min_dist_to_origin <= np.linalg.norm(
                     agent_pos) <= max_dist_to_origin:
@@ -539,6 +543,7 @@ class RunTask(bases.Task):
         agent,
         obstacles,
         use_graphics,
+        rng=None,
     ):
         super().__init__(
             bc=bc,
@@ -546,7 +551,8 @@ class RunTask(bases.Task):
             agent=agent,
             obstacles=obstacles,
             continue_after_goal_achievement=False,  # no goal present
-            use_graphics=use_graphics)
+            use_graphics=use_graphics,
+            rng=rng)
         self.old_potential = 0.0  # used for shaped rewards
 
         # spawn safety boundaries and rotate by 90°
@@ -616,8 +622,8 @@ class RunTask(bases.Task):
     def specific_reset(self) -> None:
         """ Set positions and orientations of agent and obstacles."""
         self.agent.specific_reset()  # reset joints
-        new_pos = self.agent.init_xyz
-        new_pos[:2] = np.random.uniform(-0.01, 0.01, 2)
+        new_pos = self.agent.init_xyz.copy()
+        new_pos[:2] = self.rng.uniform(-0.01, 0.01, 2)
         self.agent.set_position(new_pos)
         self.old_potential = self.calculate_task_potential()
 
@@ -628,14 +634,15 @@ class RunTask(bases.Task):
 
 class GatherTask(bases.Task):
 
-    def __init__(self, bc, world, agent, obstacles, use_graphics):
+    def __init__(self, bc, world, agent, obstacles, use_graphics, rng=None):
         super().__init__(
             bc=bc,
             world=world,
             agent=agent,
             obstacles=obstacles,
             continue_after_goal_achievement=False,  # terminate after goal
-            use_graphics=use_graphics)
+            use_graphics=use_graphics,
+            rng=rng)
         self.agent_obstacle_distance = 0.5  # reduce agent obstacle spacing
         self.apple_reward = 10.
         self.bomb_cost = 1.

@@ -16,39 +16,90 @@ from gymnasium import error
 
 
 class RedirectStream(object):
+    '''Redirect a C-level file descriptor (e.g. fd 1 / fd 2) to devnull.
+
+    PyBullet's C code writes directly to the real file descriptors, so we
+    must redirect the well-known fd numbers (1 for stdout, 2 for stderr)
+    regardless of what Python's ``sys.stdout``/``sys.stderr`` point to —
+    which may differ under pytest's fd-capture.
+
+    Usage::
+
+        with RedirectStream(1):   # suppress C stdout
+            noisy_c_call()
     '''
-    Hide some messages when building the PyBullet engine.
-    '''
+
+    _FD_NAMES = {1: 'stdout', 2: 'stderr'}
 
     @staticmethod
-    def _flush_c_stream(stream):
-        if isinstance(stream.name, str):
-            streamname = stream.name[1:-1]
-            libc = ctypes.CDLL(None)
-            libc.fflush(ctypes.c_void_p.in_dll(libc, streamname))
+    def _flush_c_stream(fd_num):
+        """Flush the C-level FILE* associated with *fd_num*."""
+        try:
+            name = RedirectStream._FD_NAMES.get(fd_num)
+            if name:
+                libc = ctypes.CDLL(None)
+                libc.fflush(ctypes.c_void_p.in_dll(libc, name))
+        except (ValueError, OSError):
+            pass
 
-    def __init__(self, stream=sys.stdout, file=os.devnull):
-        self.stream = stream
+    def __init__(self, fd_num, file=os.devnull):
+        self._fd_num = fd_num
         self.file = file
 
     def __enter__(self):
-        self.stream.flush()  # ensures python stream unaffected
-        self.fd = open(self.file, "w+")
-        self.dup_stream = os.dup(self.stream.fileno())
-        os.dup2(self.fd.fileno(), self.stream.fileno())  # replaces stream
+        self._devnull = None
+        self._saved_fd = None
+        try:
+            self._devnull = open(self.file, 'w+')
+            self._saved_fd = os.dup(self._fd_num)
+            os.dup2(self._devnull.fileno(), self._fd_num)
+        except OSError:
+            # Clean up any partially-acquired resources before marking as failed
+            if self._saved_fd is not None:
+                os.close(self._saved_fd)
+                self._saved_fd = None
+            if self._devnull is not None:
+                self._devnull.close()
+                self._devnull = None
+            self._fd_num = None  # mark as failed so __exit__ is a no-op
 
     def __exit__(self, type, value, traceback):
-        RedirectStream._flush_c_stream(
-            self.stream)  # ensures C stream buffer empty
-        os.dup2(self.dup_stream, self.stream.fileno())  # restores stream
-        os.close(self.dup_stream)
-        self.fd.close()
+        if self._fd_num is None:
+            return
+        try:
+            RedirectStream._flush_c_stream(self._fd_num)
+            os.dup2(self._saved_fd, self._fd_num)
+            os.close(self._saved_fd)
+            self._devnull.close()
+        except OSError:
+            pass
 
 
-with RedirectStream(sys.stderr):
+with RedirectStream(1), RedirectStream(2):
     import pybullet as pb
 
 from pybullet_utils import bullet_client
+
+# PyBullet's C code prints "argv[0]=\n" to stdout both when creating a
+# BulletClient and during atexit cleanup.  Construction-time noise is
+# already suppressed by RedirectStream in _setup_client_and_physics.
+# The atexit noise must be suppressed separately.  Because atexit
+# callbacks run in LIFO order, registering *after* the pybullet import
+# ensures our handler runs *before* PyBullet's cleanup.
+import atexit as _atexit
+
+def _suppress_pybullet_exit_noise():
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        _devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(_devnull, 1)
+        os.dup2(_devnull, 2)
+        os.close(_devnull)
+    except Exception:
+        pass
+
+_atexit.register(_suppress_pybullet_exit_noise)
 
 from bullet_safety_gym.envs import agents, bases, tasks, worlds
 from bullet_safety_gym.envs.obstacles import create_obstacles
@@ -157,6 +208,9 @@ class EnvironmentBuilder(gym.Env):
         self.bullet_client_id = self.bc._client
         self.stored_state_id = -1
 
+        # RNG for reproducibility (must be created before _setup_simulation)
+        self._rng = np.random.default_rng()
+
         self._setup_simulation()
 
         # Define limits for observation space and action space
@@ -173,14 +227,25 @@ class EnvironmentBuilder(gym.Env):
         self.iteration = 0
 
     def seed(self, seed=None):
+        """Set the RNG seed for reproducibility.
+
+        Prefer using reset(seed=...) instead (Gymnasium API).
+        """
         if seed is not None and not (isinstance(seed, int) and 0 <= seed):
             raise error.Error(
                 f"Seed must be a non-negative integer or omitted, not {seed}")
-
-        seed_seq = np.random.SeedSequence(seed)
-        np_seed = seed_seq.entropy
-        rng = np.random.Generator(np.random.PCG64(seed_seq))
-        return rng, np_seed
+        self._rng = np.random.default_rng(seed)
+        # propagate to all components
+        if hasattr(self, 'world'):
+            self.world.rng = self._rng
+        if hasattr(self, 'agent'):
+            self.agent.rng = self._rng
+        if hasattr(self, 'task'):
+            self.task.rng = self._rng
+        if hasattr(self, 'obstacles'):
+            for ob in self.obstacles:
+                ob.rng = self._rng
+        return self._rng, seed
 
     def _setup_client_and_physics(self,
                                   graphics=False
@@ -201,7 +266,7 @@ class EnvironmentBuilder(gym.Env):
         bc: BulletClient
             The instance of the created PyBullet client process.
         """
-        with RedirectStream(sys.stdout):
+        with RedirectStream(1):
             if graphics or self.use_graphics:
                 bc = bullet_client.BulletClient(connection_mode=pb.GUI)
             else:
@@ -249,13 +314,17 @@ class EnvironmentBuilder(gym.Env):
         self.world = self.get_world(world['name'], factor)
         # call agent class: spawns agent in world and collect joint information
         self.agent = self.get_agent(agent)
+        # propagate shared RNG to world and agent
+        self.world.rng = self._rng
+        self.agent.rng = self._rng
         # calculate the number of obstacles
         if obstacles:
             number_obstacles = [v['number'] for k, v in obstacles.items()]
             self.num_obstacles = sum(number_obstacles)
             self.obstacles = create_obstacles(self.bc,
                                               obstacles,
-                                              env_dim=self.world.env_dim)
+                                              env_dim=self.world.env_dim,
+                                              rng=self._rng)
         else:
             self.num_obstacles = 0
             self.obstacles = []
@@ -266,7 +335,9 @@ class EnvironmentBuilder(gym.Env):
 
     def close(self):
         if self.bullet_client_id >= 0:
-            self.bc.disconnect()
+            with RedirectStream(1):
+                self.bc.disconnect()
+            self.bc._client = -1  # prevent __del__ from disconnecting again
         self.bullet_client_id = -1
 
     def get_agent(self, ag: str) -> bases.Agent:
@@ -318,7 +389,8 @@ class EnvironmentBuilder(gym.Env):
                     world=self.world,
                     agent=self.agent,
                     obstacles=self.obstacles,
-                    use_graphics=self.use_graphics)
+                    use_graphics=self.use_graphics,
+                    rng=self._rng)
 
     def get_world(self, name: str, factor: float) -> bases.World:
         """Instantiate the world including ground plane and arena.
@@ -459,12 +531,37 @@ class EnvironmentBuilder(gym.Env):
         array
             holding the observation of the initial state
         """
+        super().reset(seed=seed)
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+            # propagate new RNG to all components
+            self.world.rng = self._rng
+            self.agent.rng = self._rng
+            self.task.rng = self._rng
+            for ob in self.obstacles:
+                ob.rng = self._rng
         # disable rendering before resetting
         self.bc.configureDebugVisualizer(self.bc.COV_ENABLE_RENDERING, 0)
         if self.stored_state_id >= 0:
             self.bc.restoreState(self.stored_state_id)
         self.iteration = 0
+        # reset constraint violation visual
+        self.agent.violates_constraints(False)
+        # reset obstacle movement counters and re-derive movement offsets
+        # from the seeded RNG so that circular-moving obstacles are
+        # deterministic across env instances sharing the same seed.
+        for ob in self.obstacles:
+            ob._movement_step = 0
+            ob.movement_offset = self._rng.uniform(0, 2 * np.pi)
         self.task.specific_reset()
+        # Reset obstacle orientations deterministically so that obstacles
+        # whose initial orientation was randomized at construction time
+        # (e.g. Box, Orb) are consistent across env instances with the
+        # same seed.
+        for ob in self.obstacles:
+            yaw = self._rng.uniform(0, 2 * np.pi)
+            quat = self.bc.getQuaternionFromEuler([0, 0, yaw])
+            ob.set_orientation(quat)
         # Restoring a saved state circumvents the necessity to load all bodies
         # again..
         if self.stored_state_id < 0:

@@ -5,8 +5,8 @@ from bullet_safety_gym.envs import bases
 
 class Plane(bases.World):
 
-    def __init__(self, bc, file_name, env_dim, global_scaling=1.):
-        super().__init__(bc=bc, global_scaling=global_scaling, env_dim=env_dim)
+    def __init__(self, bc, file_name, env_dim, global_scaling=1., rng=None):
+        super().__init__(bc=bc, global_scaling=global_scaling, env_dim=env_dim, rng=rng)
         file_name_path = "plane/" + file_name
         self.plane_id = i = self.bc.loadURDF(file_name_path)
         self.bc.changeDynamics(i, -1, lateralFriction=0.8, restitution=0.5)
@@ -18,59 +18,64 @@ class Plane(bases.World):
     def generate_random_xyz_position(self, max_xy=None):
         if max_xy is None:
             max_xy = int(0.7 * self.env_dim)
-        pos = np.concatenate((np.random.uniform(-max_xy, max_xy, 2), [0]))
+        pos = np.concatenate((self.rng.uniform(-max_xy, max_xy, 2), [0]))
         return pos
 
 
 class Plane10(Plane):
 
-    def __init__(self, bc, global_scaling=1., env_dim=10):
+    def __init__(self, bc, global_scaling=1., env_dim=10, rng=None):
         super().__init__(bc=bc,
                          file_name='plane10.urdf',
                          global_scaling=global_scaling,
-                         env_dim=env_dim)
+                         env_dim=env_dim,
+                         rng=rng)
 
 
 class Plane15(Plane):
 
-    def __init__(self, bc, global_scaling=1., env_dim=15):
+    def __init__(self, bc, global_scaling=1., env_dim=15, rng=None):
         super().__init__(bc=bc,
                          file_name='plane15.urdf',
                          global_scaling=global_scaling,
-                         env_dim=env_dim)
+                         env_dim=env_dim,
+                         rng=rng)
 
 
 class Plane20(Plane):
 
-    def __init__(self, bc, global_scaling=1., env_dim=20):
+    def __init__(self, bc, global_scaling=1., env_dim=20, rng=None):
         super().__init__(bc=bc,
                          file_name='plane20.urdf',
                          global_scaling=global_scaling,
-                         env_dim=env_dim)
+                         env_dim=env_dim,
+                         rng=rng)
 
 
 class Plane100(Plane):
 
-    def __init__(self, bc, global_scaling=1., env_dim=100):
+    def __init__(self, bc, global_scaling=1., env_dim=100, rng=None):
         super().__init__(bc=bc,
                          file_name='plane100.urdf',
                          global_scaling=global_scaling,
-                         env_dim=env_dim)
+                         env_dim=env_dim,
+                         rng=rng)
 
 
 class Plane200(Plane):
 
-    def __init__(self, bc, global_scaling=1., env_dim=250):
+    def __init__(self, bc, global_scaling=1., env_dim=250, rng=None):
         super().__init__(bc=bc,
                          file_name='plane250.urdf',
                          global_scaling=global_scaling,
-                         env_dim=env_dim)
+                         env_dim=env_dim,
+                         rng=rng)
 
 
 class SmallRoom(Plane10):
 
-    def __init__(self, bc, global_scaling=1, env_dim=10):
-        super().__init__(bc, global_scaling, env_dim)
+    def __init__(self, bc, global_scaling=1, env_dim=10, rng=None):
+        super().__init__(bc, global_scaling, env_dim, rng=rng)
         self.room_id = self.bc.loadURDF("obstacles/room_20x20.urdf",
                                         globalScaling=global_scaling,
                                         useFixedBase=True)
@@ -78,8 +83,8 @@ class SmallRoom(Plane10):
 
 class MediumRoom(Plane15):
 
-    def __init__(self, bc, global_scaling=1, env_dim=15):
-        super().__init__(bc, global_scaling, env_dim)
+    def __init__(self, bc, global_scaling=1, env_dim=15, rng=None):
+        super().__init__(bc, global_scaling, env_dim, rng=rng)
         self.room_id = self.bc.loadURDF("obstacles/room_30x30.urdf",
                                         globalScaling=global_scaling,
                                         useFixedBase=True)
@@ -87,8 +92,8 @@ class MediumRoom(Plane15):
 
 class LargeRoom(Plane20):
 
-    def __init__(self, bc, global_scaling=1, env_dim=20):
-        super().__init__(bc, global_scaling, env_dim)
+    def __init__(self, bc, global_scaling=1, env_dim=20, rng=None):
+        super().__init__(bc, global_scaling, env_dim, rng=rng)
         print('Large Room:', env_dim)
         self.room_id = self.bc.loadURDF("obstacles/room_40x40.urdf",
                                         globalScaling=global_scaling,
@@ -97,8 +102,8 @@ class LargeRoom(Plane20):
 
 class Octagon(Plane15):
 
-    def __init__(self, bc, global_scaling=1, env_dim=10):
-        super().__init__(bc, global_scaling, env_dim)
+    def __init__(self, bc, global_scaling=1, env_dim=10, rng=None):
+        super().__init__(bc, global_scaling, env_dim, rng=rng)
         self.walls = []
         yaw_list = np.linspace(0, 7 / 8 * 2 * np.pi, num=8)
         for yaw in yaw_list:
@@ -111,8 +116,8 @@ class Octagon(Plane15):
 
     def generate_random_xyz_position(self):
         dim_factor = 0.7
-        angle = np.random.uniform() * 2 * np.pi
-        radius = self.env_dim * np.sqrt(np.random.uniform()) * dim_factor
+        angle = self.rng.uniform() * 2 * np.pi
+        radius = self.env_dim * np.sqrt(self.rng.uniform()) * dim_factor
         x = radius * np.cos(angle)
         y = radius * np.sin(angle)
         pos = np.array([x, y, 0])

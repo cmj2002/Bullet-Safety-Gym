@@ -8,7 +8,6 @@
 """
 import abc
 import os
-import time
 
 import numpy as np
 import pybullet as pb
@@ -504,7 +503,9 @@ class Agent(Body):
                  self_collision=True,
                  max_velocity=None,
                  debug=False,
+                 rng: np.random.Generator = None,
                  **kwargs):
+        self.rng = rng if rng is not None else np.random.default_rng()
         Body.__init__(self,
                       bc=bc,
                       name=name,
@@ -726,7 +727,8 @@ class Obstacle(Body):
                  init_orientation=(0., 0., 0),
                  init_color=(1., 1., 1, 1.0),
                  movement='static',
-                 owns_collision_shape=True):
+                 owns_collision_shape=True,
+                 rng: np.random.Generator = None):
         super().__init__(bc=bc,
                          name=name,
                          file_name=file_name,
@@ -735,10 +737,12 @@ class Obstacle(Body):
                          global_scaling=global_scaling,
                          init_color=init_color,
                          init_orientation=init_orientation)
+        self.rng = rng if rng is not None else np.random.default_rng()
         self.owns_collision_shape = owns_collision_shape
         self.movement = movement
         # use offset such that objects exhibit different movement patterns
-        self.movement_offset = np.random.uniform(0, 2 * np.pi)
+        self.movement_offset = self.rng.uniform(0, 2 * np.pi)
+        self._movement_step = 0
         if movement.lower() != 'static':
             self.constraint = self.bc.createConstraint(
                 parentBodyUniqueId=self.body_id,
@@ -755,9 +759,11 @@ class Obstacle(Body):
             r = 0.7
             vel_factor = 1
             t = self.movement_offset
+            sim_time = self._movement_step * self.bc.getPhysicsEngineParameters()['fixedTimeStep']
+            self._movement_step += 1
             circle_vec = np.array([
-                np.sin(vel_factor * (time.time() + t)),
-                np.cos(vel_factor * (time.time() + t)), 0
+                np.sin(vel_factor * (sim_time + t)),
+                np.cos(vel_factor * (sim_time + t)), 0
             ])
             target_pos = np.array(self.init_xyz) + r * circle_vec
             self.bc.changeConstraint(self.constraint, target_pos)
@@ -805,7 +811,8 @@ class Task(abc.ABC):
                  obstacles: list,
                  continue_after_goal_achievement: bool,
                  use_graphics: bool,
-                 agent_obstacle_distance: float = 2.5):
+                 agent_obstacle_distance: float = 2.5,
+                 rng: np.random.Generator = None):
         self.agent = agent
         self.agent_obstacle_distance = agent_obstacle_distance
         self.bc = bc
@@ -813,6 +820,7 @@ class Task(abc.ABC):
         self.obstacles = obstacles
         self.world = world
         self.use_graphics = use_graphics
+        self.rng = rng if rng is not None else np.random.default_rng()
         self.setup_camera()
 
     @abc.abstractmethod
@@ -896,8 +904,10 @@ class World:
                  bc: bullet_client.BulletClient,
                  global_scaling: float,
                  env_dim: float,
-                 body_min_distance: float = 2.5):
+                 body_min_distance: float = 2.5,
+                 rng: np.random.Generator = None):
         self.bc = bc
+        self.rng = rng if rng is not None else np.random.default_rng()
         self.global_scaling = global_scaling
         self.body_min_distance = body_min_distance
 

@@ -316,6 +316,71 @@ class TestEnvs(unittest.TestCase):
                 env = gym.make(env_spec.id)
                 check_env(env)
 
+    def test_seed_determinism(self):
+        """Two episodes with the same seed should produce identical results."""
+        env_name = 'SafetyBallReach-v0'
+        seed = 42
+        num_steps = 20
+
+        def collect_trajectory(env, seed):
+            obs, _ = env.reset(seed=seed)
+            observations = [obs.copy()]
+            rewards = []
+            for _ in range(num_steps):
+                action = np.zeros(env.action_space.shape)
+                obs, r, terminated, truncated, info = env.step(action)
+                observations.append(obs.copy())
+                rewards.append(r)
+                if terminated or truncated:
+                    break
+            return observations, rewards
+
+        env1 = gym.make(env_name)
+        obs1, rew1 = collect_trajectory(env1, seed)
+        env1.close()
+
+        env2 = gym.make(env_name)
+        obs2, rew2 = collect_trajectory(env2, seed)
+        env2.close()
+
+        self.assertEqual(len(obs1), len(obs2))
+        for o1, o2 in zip(obs1, obs2):
+            np.testing.assert_array_equal(o1, o2)
+        for r1, r2 in zip(rew1, rew2):
+            self.assertAlmostEqual(r1, r2, places=10)
+
+    def test_reset_no_state_leak(self):
+        """State from a previous episode should not leak after reset."""
+        env_name = 'SafetyBallReach-v0'
+        seed = 123
+        env = gym.make(env_name)
+
+        obs1, _ = env.reset(seed=seed)
+        # run several steps to change internal state
+        for _ in range(50):
+            env.step(env.action_space.sample())
+
+        obs2, _ = env.reset(seed=seed)
+        # PyBullet restoreState may have tiny floating-point residuals,
+        # so use a tolerance. The key is that positions/goals are deterministic.
+        np.testing.assert_allclose(
+            obs1, obs2, atol=1e-3,
+            err_msg="Observations after reset with same seed should be nearly identical")
+        env.close()
+
+    def test_init_xyz_not_mutated(self):
+        """Agent's init_xyz should not be mutated across resets."""
+        env_name = 'SafetyBallRun-v0'
+        env = gym.make(env_name)
+        env.reset(seed=0)
+        init_xyz_before = env.unwrapped.agent.init_xyz.copy()
+        env.reset(seed=1)
+        init_xyz_after = env.unwrapped.agent.init_xyz.copy()
+        np.testing.assert_array_equal(
+            init_xyz_before, init_xyz_after,
+            err_msg="Agent init_xyz should not be mutated by reset")
+        env.close()
+
 
 if __name__ == '__main__':
     unittest.main()

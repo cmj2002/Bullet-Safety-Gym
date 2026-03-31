@@ -101,6 +101,7 @@ class Ball(bases.Agent):
     def specific_reset(self):
         """ Reset only agent specifics such as motor joints. Do not set position
             or orientation since this is handled by task.specific_reset()."""
+        self.last_taken_action = np.zeros(self.act_dim)
         self.set_position(self.init_xyz)
 
     def specific_reward(self) -> float:
@@ -297,7 +298,19 @@ class RaceCar(bases.Agent):
     def specific_reset(self):
         """ reset motor joints."""
         for j in self.motor_list:
-            j.set_state(np.random.uniform(low=-0.1, high=0.1), 0)
+            j.set_state(self.rng.uniform(low=-0.1, high=0.1), 0)
+        # Reset motor control commands to prevent stale targets from last episode
+        for motor in self.motorized_wheels:
+            self.bc.setJointMotorControl2(self.body_id,
+                                          motor,
+                                          self.bc.VELOCITY_CONTROL,
+                                          targetVelocity=0,
+                                          force=0)
+        for steer in self.steering_links:
+            self.bc.setJointMotorControl2(self.body_id,
+                                          steer,
+                                          self.bc.POSITION_CONTROL,
+                                          targetPosition=0)
 
     def specific_reward(self) -> float:
         """ Some agents exhibit additional rewards besides the task objective,
@@ -397,10 +410,14 @@ class MJCFAgent(bases.Agent):
     def specific_reset(self) -> None:
         for j in self.motor_list:
             j.reset_position_and_disable_motor(
-                np.random.uniform(low=-0.1, high=0.1), 0)
+                self.rng.uniform(low=-0.1, high=0.1), 0)
             j.power_coefficient = 100.
         self.feet_contact = np.array([0.0 for _ in self.foot_list],
                                      dtype=np.float32)
+        self.feet_collision_reward = 0.0
+        self.joints_at_limit_reward = 0.0
+        self.action_reward = 0.0
+        self.last_taken_action = np.zeros(len(self.motor_list))
 
     def specific_reward(self) -> float:
         """ Some agents exhibit additional rewards besides the task objective,
@@ -457,7 +474,7 @@ class Ant(MJCFAgent):
             movements.
         """
         for i, j in enumerate(self.motor_list):
-            noise = np.random.uniform(low=-0.1, high=0.1)
+            noise = self.rng.uniform(low=-0.1, high=0.1)
             pos = noise if i % 2 == 0 else np.pi / 2 + noise
             if i == 3 or i == 5:
                 pos *= -1
@@ -465,6 +482,10 @@ class Ant(MJCFAgent):
             j.power_coefficient = 100.
         self.feet_contact = np.array([0.0 for _ in self.foot_list],
                                      dtype=np.float32)
+        self.feet_collision_reward = 0.0
+        self.joints_at_limit_reward = 0.0
+        self.action_reward = 0.0
+        self.last_taken_action = np.zeros(len(self.motor_list))
 
     def upgrade_power(self):
         """Some tasks require higher agent powers to encourage exploratory
@@ -635,7 +656,13 @@ class Drone(bases.Agent):
     def specific_reset(self) -> None:
         """ reset motor joints."""
         for j in self.motor_list:
-            j.set_state(np.random.uniform(low=-0.1, high=0.1), 0)
+            j.set_state(self.rng.uniform(low=-0.1, high=0.1), 0)
+            # Reset motor control to prevent stale velocity targets
+            j.disable_motor()
+        # Reset state tracking variables
+        self.rotor_ground_contact = np.zeros_like(self.link_list)
+        self.ground_collision_penalty = 0.0
+        self.last_action = np.zeros(self.act_dim)
 
     def specific_reward(self) -> float:
         """ Some agents exhibit additional rewards besides the task objective,

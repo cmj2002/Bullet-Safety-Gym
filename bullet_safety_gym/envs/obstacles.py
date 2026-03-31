@@ -1,5 +1,3 @@
-import random
-
 import numpy as np
 
 from bullet_safety_gym.envs import bases
@@ -12,7 +10,8 @@ class Apple(bases.Obstacle):
                  init_xyz,
                  fixed_base=True,
                  movement='static',
-                 global_scaling=1.):
+                 global_scaling=1.,
+                 rng=None):
         super().__init__(bc=bc,
                          name='Apple',
                          file_name='obstacles/apple.urdf',
@@ -20,7 +19,8 @@ class Apple(bases.Obstacle):
                          global_scaling=global_scaling,
                          init_xyz=init_xyz,
                          init_color=(0.05, 0.95, 0, 1.0),
-                         movement=movement)
+                         movement=movement,
+                         rng=rng)
 
     def detect_collision(self, agent: bases.Agent):
         """ Apples do not own a collision shape"""
@@ -34,7 +34,8 @@ class Bomb(bases.Obstacle):
                  init_xyz,
                  fixed_base=True,
                  movement='static',
-                 global_scaling=1.):
+                 global_scaling=1.,
+                 rng=None):
         super().__init__(bc=bc,
                          name='Bomb',
                          file_name='obstacles/bomb.urdf',
@@ -42,7 +43,8 @@ class Bomb(bases.Obstacle):
                          global_scaling=global_scaling,
                          init_xyz=init_xyz,
                          init_color=(0.95, 0.05, 0, 1.0),
-                         movement=movement)
+                         movement=movement,
+                         rng=rng)
         self.visible = True
 
     def detect_collision(self, agent: bases.Agent):
@@ -52,7 +54,9 @@ class Bomb(bases.Obstacle):
 
 class Box(bases.Obstacle):
 
-    def __init__(self, bc, init_xyz, fixed_base, movement, global_scaling=1.):
+    def __init__(self, bc, init_xyz, fixed_base, movement, global_scaling=1., rng=None):
+        if rng is None:
+            rng = np.random.default_rng()
         super().__init__(bc=bc,
                          name='Box',
                          file_name='obstacles/box.urdf',
@@ -60,8 +64,9 @@ class Box(bases.Obstacle):
                          global_scaling=global_scaling,
                          init_xyz=init_xyz,
                          init_orientation=(0, 0,
-                                           2 * np.pi * random.uniform(0, 1)),
-                         movement=movement)
+                                           2 * np.pi * rng.uniform(0, 1)),
+                         movement=movement,
+                         rng=rng)
 
     def detect_collision(self, agent: bases.Agent):
         collision_list = self.bc.getContactPoints(bodyA=agent.body_id,
@@ -123,7 +128,9 @@ class LineBoundary(bases.Obstacle):
 
 class Orb(bases.Obstacle):
 
-    def __init__(self, bc, init_xyz, fixed_base, movement, global_scaling=1.):
+    def __init__(self, bc, init_xyz, fixed_base, movement, global_scaling=1., rng=None):
+        if rng is None:
+            rng = np.random.default_rng()
         super().__init__(
             bc=bc,
             name='Orb',
@@ -131,8 +138,9 @@ class Orb(bases.Obstacle):
             fixed_base=fixed_base,
             global_scaling=global_scaling,
             init_xyz=init_xyz,
-            init_orientation=[0, 0, 2 * np.pi * random.uniform(0, 1)],
-            movement=movement)
+            init_orientation=[0, 0, 2 * np.pi * rng.uniform(0, 1)],
+            movement=movement,
+            rng=rng)
 
     def detect_collision(self, agent: bases.Agent):
         collision_list = self.bc.getContactPoints(bodyA=agent.body_id,
@@ -144,7 +152,7 @@ class Orb(bases.Obstacle):
 
 class Pillar(bases.Obstacle):
 
-    def __init__(self, bc, init_xyz, fixed_base, movement, global_scaling=1.):
+    def __init__(self, bc, init_xyz, fixed_base, movement, global_scaling=1., rng=None):
         super().__init__(bc=bc,
                          name='Pillar',
                          file_name='obstacles/pillar.urdf',
@@ -152,7 +160,8 @@ class Pillar(bases.Obstacle):
                          init_xyz=init_xyz,
                          global_scaling=global_scaling,
                          movement=movement,
-                         owns_collision_shape=False)
+                         owns_collision_shape=False,
+                         rng=rng)
         self.radius = 0.45 * global_scaling
 
     def detect_collision(self, agent: bases.Agent) -> bool:
@@ -204,14 +213,15 @@ class Puck(bases.Obstacle):
 
 class Puddle(bases.Obstacle):
 
-    def __init__(self, bc, init_xyz, fixed_base, movement, global_scaling=1.):
+    def __init__(self, bc, init_xyz, fixed_base, movement, global_scaling=1., rng=None):
         super().__init__(bc=bc,
                          name='puddle',
                          file_name='obstacles/puddle.urdf',
                          fixed_base=True,
                          init_xyz=[0, 0, 0],
                          global_scaling=global_scaling,
-                         owns_collision_shape=False)
+                         owns_collision_shape=False,
+                         rng=rng)
         self.radius = 1.0 * global_scaling
 
     # def detect_collision(self, agent: bases.Agent) -> bool:
@@ -246,7 +256,7 @@ class Puddle(bases.Obstacle):
                 disable_collision)
 
 
-def create_obstacles(bc, obstacles: dict, env_dim: float) -> list:
+def create_obstacles(bc, obstacles: dict, env_dim: float, rng=None) -> list:
     assert obstacles, f'obstacles={obstacles} is empty.'
     spawned_obstacles = []
     num_obstacles = sum([v['number'] for k, v in obstacles.items()])
@@ -268,7 +278,7 @@ def create_obstacles(bc, obstacles: dict, env_dim: float) -> list:
         props = properties.copy()
         num = props.pop('number')
         for i in range(num):  # now instantiate obstacles
-            obstacle = obstacle_class(bc, obs_init_pos[i], **props)
+            obstacle = obstacle_class(bc, obs_init_pos[i], **props, rng=rng)
             spawned_obstacles.append(obstacle)
 
     return spawned_obstacles
