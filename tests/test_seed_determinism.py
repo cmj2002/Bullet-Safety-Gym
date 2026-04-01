@@ -26,7 +26,10 @@ ALL_ENV_IDS = sorted(
     if 'Safety' in spec.id
 )
 
-SEED = 42
+# Multiple seeds are exercised so that flaky physics-engine non-determinism
+# (which only manifests for certain seed/state combinations) is more likely to
+# be caught locally rather than appearing only on CI.
+SEEDS = [0, 7, 42, 123, 2024]
 NUM_STEPS = 15
 # Separate fixed seed for action generation — must be independent of the env
 # seed so that the same action sequence is replayed across all scenarios.
@@ -74,16 +77,17 @@ def assert_trajectories_equal(traj_a, traj_b, label=""):
         )
 
 
+@pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("env_id", ALL_ENV_IDS)
-def test_seed_determinism_across_instances_and_resets(env_id):
+def test_seed_determinism_across_instances_and_resets(env_id, seed):
     """Same seed → identical trajectory, across fresh instances and re-resets."""
     # --- Scenario A: fresh env1 ---
     env1 = gym.make(env_id)
-    traj_a = collect_trajectory(env1, seed=SEED)
+    traj_a = collect_trajectory(env1, seed=seed)
 
     # --- Scenario B: fresh env2 ---
     env2 = gym.make(env_id)
-    traj_b = collect_trajectory(env2, seed=SEED)
+    traj_b = collect_trajectory(env2, seed=seed)
     assert_trajectories_equal(traj_a, traj_b, label="A-vs-B (cross-instance)")
 
     # Run both envs for a while to change internal state
@@ -93,22 +97,31 @@ def test_seed_determinism_across_instances_and_resets(env_id):
             _env.step(_env.action_space.sample())
 
     # --- Scenario C: env1 re-reset with same seed ---
-    traj_c = collect_trajectory(env1, seed=SEED)
+    traj_c = collect_trajectory(env1, seed=seed)
     assert_trajectories_equal(traj_a, traj_c, label="A-vs-C (env1 re-reset)")
 
     # --- Scenario D: env2 re-reset with same seed ---
-    traj_d = collect_trajectory(env2, seed=SEED)
+    traj_d = collect_trajectory(env2, seed=seed)
     assert_trajectories_equal(traj_a, traj_d, label="A-vs-D (env2 re-reset)")
 
     env1.close()
     env2.close()
 
 
-SEED2 = 99
+# Pairs of (dirty_seed, clean_seed): we run with dirty_seed first, then
+# reset with clean_seed and compare against a fresh env seeded with clean_seed.
+SEED_SWITCH_PAIRS = [
+    (0, 99),
+    (42, 99),
+    (7, 13),
+    (100, 200),
+    (2024, 1),
+]
 
 
+@pytest.mark.parametrize("seed1, seed2", SEED_SWITCH_PAIRS)
 @pytest.mark.parametrize("env_id", ALL_ENV_IDS)
-def test_seed_switch_determinism(env_id):
+def test_seed_switch_determinism(env_id, seed1, seed2):
     """Switching seeds must erase all prior state.
 
     env1: reset(seed1) → run → reset(seed2) → trajectory X
@@ -117,14 +130,14 @@ def test_seed_switch_determinism(env_id):
     """
     # env1: run with seed1, then switch to seed2
     env1 = gym.make(env_id)
-    env1.reset(seed=SEED)
+    env1.reset(seed=seed1)
     for _ in range(30):
         env1.step(env1.action_space.sample())
-    traj_x = collect_trajectory(env1, seed=SEED2)
+    traj_x = collect_trajectory(env1, seed=seed2)
 
     # env2: fresh start with seed2
     env2 = gym.make(env_id)
-    traj_y = collect_trajectory(env2, seed=SEED2)
+    traj_y = collect_trajectory(env2, seed=seed2)
 
     assert_trajectories_equal(traj_x, traj_y, label="seed-switch")
 

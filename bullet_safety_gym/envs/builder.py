@@ -544,6 +544,8 @@ class EnvironmentBuilder(gym.Env):
         self.bc.configureDebugVisualizer(self.bc.COV_ENABLE_RENDERING, 0)
         if self.stored_state_id >= 0:
             self.bc.restoreState(self.stored_state_id)
+            self.bc.removeState(self.stored_state_id)
+            self.stored_state_id = -1
         self.iteration = 0
         # reset constraint violation visual
         self.agent.violates_constraints(False)
@@ -562,10 +564,15 @@ class EnvironmentBuilder(gym.Env):
             yaw = self._rng.uniform(0, 2 * np.pi)
             quat = self.bc.getQuaternionFromEuler([0, 0, yaw])
             ob.set_orientation(quat)
-        # Restoring a saved state circumvents the necessity to load all bodies
-        # again..
-        if self.stored_state_id < 0:
-            self.stored_state_id = self.bc.saveState()
+        # Explicitly zero all velocities so that no residual motion from a
+        # previous episode leaks into the new one.
+        self.agent.set_velocity([0, 0, 0], [0, 0, 0])
+        for ob in self.obstacles:
+            ob.set_velocity([0, 0, 0], [0, 0, 0])
+        # Save a fresh state snapshot *after* resetting positions/velocities
+        # so that the next restoreState loads a clean solver cache matching
+        # the current layout (not a stale one from the first ever reset).
+        self.stored_state_id = self.bc.saveState()
         # now enable rendering again
         self.bc.stepSimulation()
         if self.use_graphics:

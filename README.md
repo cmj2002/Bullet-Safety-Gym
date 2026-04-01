@@ -29,6 +29,12 @@ Several agents did not fully reset their internal state between episodes, causin
 
 **Fix:** Added proper state resets in each agent's `specific_reset()` method.
 
+### Deterministic Reset Snapshots
+
+PyBullet reset behavior was still occasionally non-deterministic in CI when an environment was reset with one seed, run for a while, and then reset with a different seed. The root cause was the interaction between PyBullet's saved solver state and per-episode repositioning: restoring an old state snapshot and then changing body poses could leave the next episode starting from a solver cache that no longer matched the current layout.
+
+**Fix:** `EnvironmentBuilder.reset()` now restores the previously saved clean state, fully reapplies the seeded episode layout, explicitly zeros body velocities, and then saves a fresh snapshot for the next reset. This keeps the performance benefit of `saveState()` / `restoreState()` while preventing cross-episode state leakage when switching seeds.
+
 ### `init_xyz` Mutation Bug
 
 `ReachGoalTask` and `RunTask` directly mutated `agent.init_xyz` when setting new episode positions (`agent_pos = self.agent.init_xyz`, then `agent_pos[:2] = ...`). This permanently altered the agent's initial position template.
@@ -53,13 +59,14 @@ Calling `env.close()` could trigger a second `disconnect()` in `BulletClient.__d
 
 **Fix:** Set `bc._client = -1` after disconnect to prevent the destructor from disconnecting again, and wrapped `disconnect()` in `RedirectStream(1)` to suppress output.
 
-### New Tests
+### Expanded Determinism Tests
 
-Added three tests in `tests/test_envs.py`:
+The test suite now exercises deterministic behavior much more aggressively across all registered environments.
 
-- `test_seed_determinism` — Two episodes with the same seed produce identical trajectories.
-- `test_reset_no_state_leak` — State from a previous episode does not leak after reset.
-- `test_init_xyz_not_mutated` — Agent's `init_xyz` is not mutated across resets.
+- `tests/test_seed_determinism.py` checks that identical seeds produce identical trajectories across fresh env instances and repeated resets.
+- `tests/test_seed_determinism.py` also checks seed-switch behavior: `reset(seed=a) -> run -> reset(seed=b)` must match a fresh env started with `seed=b`.
+- These checks now run across multiple seed values and seed pairs to make CI-only determinism bugs reproducible locally.
+- `tests/test_envs.py` still covers general environment behavior, including protection against `init_xyz` mutation across resets.
 
 ## Installation
 
