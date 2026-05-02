@@ -382,5 +382,81 @@ class TestEnvs(unittest.TestCase):
         env.close()
 
 
+class TestDeathCostV1(unittest.TestCase):
+    """Tests specific to v1 environments: death_cost=21 applied when alive=False."""
+
+    V1_ENVS = [
+        'SafetyDroneCircle-v1',
+        'SafetyDroneRun-v1',
+    ]
+    V0_COUNTERPARTS = [
+        'SafetyDroneCircle-v0',
+        'SafetyDroneRun-v0',
+    ]
+
+    def _force_drone_death(self, env):
+        """Directly set the drone's orientation to roll=180° to trigger alive=False."""
+        env.reset(seed=0)
+        agent = env.unwrapped.agent
+        bc = env.unwrapped.bc
+        pos, _ = bc.getBasePositionAndOrientation(agent.body_id)
+        # roll=π → abs(roll) > π/2, so alive returns False
+        flipped_quat = bc.getQuaternionFromEuler([np.pi, 0.0, 0.0])
+        bc.resetBasePositionAndOrientation(agent.body_id, pos, flipped_quat)
+        self.assertFalse(agent.alive, "Drone should be dead after setting roll=π")
+        _, _, _, _, info = env.step(np.zeros(env.action_space.shape, dtype=np.float32))
+        return info
+
+    def test_v1_death_cost_applied(self):
+        """When Drone dies (alive=False), info['cost'] must include the 21-point death penalty."""
+        for env_name in self.V1_ENVS:
+            with self.subTest(env=env_name):
+                env = gym.make(env_name)
+                info = self._force_drone_death(env)
+                env.close()
+                self.assertGreaterEqual(
+                    info.get('cost', 0), 21,
+                    f"{env_name}: expected cost >= 21 on death step, got {info}")
+
+    def test_v0_no_death_cost(self):
+        """v0 counterparts must NOT add any death cost (death_cost=0 by default)."""
+        for env_name in self.V0_COUNTERPARTS:
+            with self.subTest(env=env_name):
+                env = gym.make(env_name)
+                # Verify death_cost is 0
+                self.assertEqual(
+                    env.unwrapped.death_cost, 0,
+                    f"{env_name}: expected death_cost=0, got {env.unwrapped.death_cost}")
+                env.close()
+
+    def test_v1_death_cost_attribute(self):
+        """v1 environments must expose death_cost=21."""
+        for env_name in self.V1_ENVS:
+            with self.subTest(env=env_name):
+                env = gym.make(env_name)
+                self.assertEqual(
+                    env.unwrapped.death_cost, 21,
+                    f"{env_name}: expected death_cost=21, got {env.unwrapped.death_cost}")
+                env.close()
+
+    def test_v1_normal_step_no_extra_cost(self):
+        """On a normal step where the drone is alive, death_cost must NOT be added."""
+        for env_name in self.V1_ENVS:
+            with self.subTest(env=env_name):
+                env = gym.make(env_name)
+                env.reset(seed=42)
+                # Take one zero-action step; drone should still be alive
+                zero_action = np.zeros(env.action_space.shape, dtype=np.float32)
+                _, _, _, _, info = env.step(zero_action)
+                self.assertTrue(
+                    env.unwrapped.agent.alive,
+                    f"{env_name}: drone unexpectedly died on first zero-action step")
+                # cost from this step should be the task cost only (< 21)
+                self.assertLess(
+                    info.get('cost', 0), 21,
+                    f"{env_name}: unexpected death cost on a normal step: {info}")
+                env.close()
+
+
 if __name__ == '__main__':
     unittest.main()

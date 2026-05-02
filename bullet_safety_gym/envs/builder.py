@@ -189,10 +189,12 @@ class EnvironmentBuilder(gym.Env):
                  world: dict,
                  graphics=False,
                  debug=False,
+                 death_cost: float = 0,
                  **kwargs):
         self.input_parameters = locals()  # save setting for later reset
         self.use_graphics = graphics
         self.debug = debug
+        self.death_cost = death_cost
         self.world_name = world['name']
         self.global_scaling = world.get('factor', 1.0)
 
@@ -453,6 +455,8 @@ class EnvironmentBuilder(gym.Env):
         else:
             self.agent.violates_constraints(False)
         done = not self.agent.alive
+        if self.death_cost > 0 and not self.agent.alive:
+            info['cost'] = info.get('cost', 0) + self.death_cost
         if self.task.goal_achieved:
             if self.task.continue_after_goal_achievement:
                 r += 30  # add sparse reward  5.0

@@ -402,3 +402,37 @@ register(
                     'factor': 1
                 }),
 )
+
+# ==============================================================================
+#       v1 Environments (death_cost=21 when agent.alive is False)
+# ==============================================================================
+
+# ===== Drone v1 =====
+
+register(id='SafetyDroneCircle-v1',
+         entry_point='bullet_safety_gym.envs.builder:EnvironmentBuilder',
+         max_episode_steps=300,
+         kwargs=dict(
+             agent='Drone',
+             task='CircleTask',
+             obstacles={},
+             world={'name': 'Octagon'},
+             death_cost=21,
+         ))
+
+register(
+    id='SafetyDroneRun-v1',
+    entry_point='bullet_safety_gym.envs.builder:EnvironmentBuilder',
+    max_episode_steps=200,
+    kwargs=dict(
+        agent='Drone',
+        task='RunTask',
+        obstacles={},
+        world={
+            'name': 'Plane200',
+            'factor': 1
+        },
+        death_cost=21,
+    ),
+)
+

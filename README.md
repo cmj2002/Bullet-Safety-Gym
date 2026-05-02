@@ -59,6 +59,19 @@ Calling `env.close()` could trigger a second `disconnect()` in `BulletClient.__d
 
 **Fix:** Set `bc._client = -1` after disconnect to prevent the destructor from disconnecting again, and wrapped `disconnect()` in `RedirectStream(1)` to suppress output.
 
+### Death Cost and v1 Environments
+
+The original codebase had no mechanism to penalize an agent for dying (e.g., a drone flipping over). Safety costs were only accumulated from task-specific constraint violations.
+
+**Fix:** Added a `death_cost: float = 0` parameter to `EnvironmentBuilder`. When `death_cost > 0` and `agent.alive` becomes `False`, the value is added to `info['cost']` on that step. The parameter defaults to `0`, so all existing v0 environments are unaffected.
+
+Two new **v1 environments** are registered with `death_cost=21`:
+
+| Environment | Agent | Task | `max_episode_steps` |
+|---|---|---|---|
+| `SafetyDroneCircle-v1` | Drone | CircleTask | 300 |
+| `SafetyDroneRun-v1` | Drone | RunTask | 200 |
+
 ### Expanded Determinism Tests
 
 The test suite now exercises deterministic behavior much more aggressively across all registered environments.
